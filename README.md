@@ -1,6 +1,6 @@
 # Swiss Ski Resorts
 
-A full-stack application for exploring Swiss ski resorts, their lifts, and elevation profiles.
+A full-stack application for exploring Swiss ski resorts, their lifts, and elevation profiles with **real data from OpenStreetMap**.
 
 ## Features
 
@@ -26,6 +26,12 @@ A full-stack application for exploring Swiss ski resorts, their lifts, and eleva
   - Distance markers
   - Hover tooltips with exact elevation data
 
+- **Real Data Import**: Fetch real-time data from OpenStreetMap:
+  - Ski lifts (aerialways) from OSM Overpass API
+  - Ski pistes/slopes with difficulty ratings
+  - Drive times calculated via OSRM routing
+  - Elevation profiles from Open Elevation API
+
 ## Tech Stack
 
 ### Backend
@@ -33,7 +39,10 @@ A full-stack application for exploring Swiss ski resorts, their lifts, and eleva
 - **Spring Data JPA** with H2 in-memory database
 - **Spring WebFlux** for reactive API calls
 - **Lombok** for boilerplate reduction
-- Integration with **Open Elevation API** for elevation data
+- Integration with:
+  - **OpenStreetMap Overpass API** for ski lift and piste data
+  - **OSRM** (Open Source Routing Machine) for drive time calculations
+  - **Open Elevation API** for elevation profiles
 
 ### Frontend
 - **Angular 18** with standalone components
@@ -48,7 +57,14 @@ ski-lifts/
 ├── backend/                    # Spring Boot REST API
 │   └── src/main/java/com/skiresorts/
 │       ├── controller/         # REST endpoints
-│       ├── service/            # Business logic
+│       │   ├── SkiResortController.java
+│       │   └── DataImportController.java
+│       ├── service/
+│       │   ├── SkiResortService.java
+│       │   ├── DataImportService.java      # OSM data import
+│       │   ├── OverpassApiService.java     # OSM Overpass API
+│       │   ├── RoutingService.java         # OSRM routing
+│       │   └── OpenElevationService.java   # Elevation API
 │       ├── repository/         # Data access
 │       ├── model/              # Entities and DTOs
 │       └── config/             # Configuration
@@ -66,6 +82,8 @@ ski-lifts/
 
 ## API Endpoints
 
+### Resort Endpoints
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/resorts` | List all ski resorts |
@@ -75,7 +93,19 @@ ski-lifts/
 | GET | `/api/resorts/search?q={query}` | Search resorts |
 | GET | `/api/resorts/{resortId}/lifts` | Get lifts for a resort |
 | GET | `/api/resorts/lifts/{liftId}` | Get lift details |
-| POST | `/api/resorts/lifts/{liftId}/elevation-profile` | Fetch elevation profile from Open Elevation API |
+| POST | `/api/resorts/lifts/{liftId}/elevation-profile` | Fetch elevation profile |
+
+### Data Import Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/import/all` | Import all known Swiss ski resorts from OSM |
+| POST | `/api/import/resort?name={name}` | Import a specific resort by name |
+| POST | `/api/import/resort/{id}/lifts` | Re-import lifts for an existing resort |
+| POST | `/api/import/resort/{id}/elevations` | Fetch elevation profiles for all lifts |
+| GET | `/api/import/preview/lifts?lat={lat}&lon={lon}&radius={m}` | Preview lifts from OSM |
+| GET | `/api/import/preview/pistes?minLat=...&maxLat=...` | Preview pistes from OSM |
+| GET | `/api/import/search?name={name}` | Search ski areas in OSM |
 
 ## Getting Started
 
@@ -103,28 +133,86 @@ npm start
 
 The app will be available at `http://localhost:4200`
 
+## Importing Real Data from OpenStreetMap
+
+The application starts with sample data. To import **real data** from OpenStreetMap:
+
+### Option 1: Import All Resorts (Recommended)
+
+```bash
+curl -X POST http://localhost:8080/api/import/all
+```
+
+This will:
+1. Fetch ski lifts for 20 major Swiss ski resorts from OpenStreetMap
+2. Count ski pistes by difficulty (blue, red, black)
+3. Calculate drive times from Zurich using OSRM
+4. Store everything in the database
+
+**Note**: This takes several minutes due to API rate limiting.
+
+### Option 2: Import Individual Resorts
+
+```bash
+# Import a specific resort
+curl -X POST "http://localhost:8080/api/import/resort?name=Zermatt"
+
+# Re-import lifts for an existing resort
+curl -X POST http://localhost:8080/api/import/resort/1/lifts
+
+# Fetch elevation profiles for all lifts
+curl -X POST http://localhost:8080/api/import/resort/1/elevations
+```
+
+### Option 3: Preview OSM Data
+
+```bash
+# Preview lifts near a location (Zermatt)
+curl "http://localhost:8080/api/import/preview/lifts?lat=46.0207&lon=7.7491&radius=5000"
+
+# Search for ski areas by name
+curl "http://localhost:8080/api/import/search?name=Verbier"
+```
+
 ## Data Sources
 
-### Ski Resort Data
-The application includes sample data for major Swiss ski resorts:
-- Arosa Lenzerheide
+### OpenStreetMap (Overpass API)
+The primary data source for ski lifts and pistes. The application queries:
+- `aerialway=*` for ski lifts (gondola, chair_lift, cable_car, drag_lift, etc.)
+- `piste:type=downhill` with `piste:difficulty` for slopes
+
+**Overpass API**: https://overpass-api.de/
+
+### OSRM (Open Source Routing Machine)
+Used to calculate driving times from Zurich to each ski resort.
+
+**Public Demo Server**: https://router.project-osrm.org/
+
+### Open Elevation API
+Provides elevation data for lift profiles based on GPS coordinates.
+
+**API**: https://api.open-elevation.com/
+
+### Supported Swiss Ski Resorts
+
+The import service knows about these major Swiss ski resorts:
 - Zermatt
+- Arosa Lenzerheide
 - St. Moritz
 - Verbier
 - Davos Klosters
-- Laax
+- Laax / Flims
 - Engelberg-Titlis
-- Jungfrau Region
+- Grindelwald / Wengen
 - Saas-Fee
-- Adelboden-Lenk
 - Crans-Montana
-- Flims Laax Falera
-
-### Elevation Data
-Elevation profiles are fetched from the [Open Elevation API](https://open-elevation.com/), which provides elevation data based on GPS coordinates. The system interpolates points along each lift's path and fetches elevation data for each point.
-
-### OpenStreetMap Integration
-Lift coordinates and metadata can be sourced from OpenStreetMap. The `osmWayId` and `osmRelationId` fields in the data model support linking to OSM data.
+- Adelboden / Lenk
+- Gstaad
+- Andermatt
+- Villars
+- Champéry
+- Nendaz
+- Leukerbad
 
 ## Angular Signals & Resources
 
@@ -165,6 +253,15 @@ The application displays:
 2. Detailed resort view with slope distribution visualization
 3. Lift cards with elevation data and expandable details
 4. Interactive SVG elevation profile charts
+
+## API Rate Limiting
+
+The application respects rate limits of public APIs:
+- **Overpass API**: 2 second delay between requests
+- **Open Elevation API**: 0.5 second delay between requests
+- **OSRM**: No explicit rate limiting, but used sparingly
+
+For production use, consider hosting your own instances of these services.
 
 ## License
 
