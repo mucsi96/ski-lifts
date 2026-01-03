@@ -1,19 +1,12 @@
 import { Component, computed, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { map, switchMap, startWith, catchError } from 'rxjs/operators';
-import { of } from 'rxjs';
+import { toSignal, rxResource } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs/operators';
 import { SkiResortService } from '../../services/ski-resort.service';
 import { Lift, SkiResortDetail, LIFT_TYPE_ICONS, LiftType } from '../../models/ski-resort.model';
 import { LiftCardComponent } from '../lift-card/lift-card.component';
 import { ElevationChartComponent } from '../elevation-chart/elevation-chart.component';
-
-interface ResourceState<T> {
-  value: T | null;
-  isLoading: boolean;
-  error: Error | null;
-}
 
 @Component({
   selector: 'app-resort-detail',
@@ -25,14 +18,14 @@ interface ResourceState<T> {
         <span class="arrow">←</span> Back to all resorts
       </a>
 
-      @if (resortState().isLoading) {
+      @if (resortResource.isLoading()) {
         <div class="loading-spinner"></div>
-      } @else if (resortState().error) {
+      } @else if (resortResource.error()) {
         <div class="error-message">
           Failed to load resort details. Please try again later.
         </div>
       } @else {
-        @if (resort(); as r) {
+        @if (resortResource.value(); as r) {
           <div class="resort-header-card card">
             <div class="header-content">
               <div class="header-main">
@@ -322,37 +315,18 @@ export class ResortDetailComponent {
 
   liftTypes: LiftType[] = ['GONDOLA', 'CABLE_CAR', 'CHAIRLIFT', 'DRAG_LIFT', 'FUNICULAR'];
 
-  private resortResource$ = this.route.paramMap.pipe(
-    map((params) => Number(params.get('id'))),
-    switchMap((id: number) =>
-      this.skiResortService.getResortById(id).pipe(
-        map((resort): ResourceState<SkiResortDetail> => ({
-          value: resort,
-          isLoading: false,
-          error: null
-        })),
-        startWith<ResourceState<SkiResortDetail>>({
-          value: null,
-          isLoading: true,
-          error: null
-        }),
-        catchError((err: Error) => of<ResourceState<SkiResortDetail>>({
-          value: null,
-          isLoading: false,
-          error: err
-        }))
-      )
-    )
+  private resortId = toSignal(
+    this.route.paramMap.pipe(map((params) => Number(params.get('id')))),
+    { initialValue: 0 }
   );
 
-  resortState = toSignal(this.resortResource$, {
-    initialValue: { value: null, isLoading: true, error: null } as ResourceState<SkiResortDetail>
+  resortResource = rxResource({
+    request: () => this.resortId(),
+    loader: ({ request: id }) => this.skiResortService.getResortById(id)
   });
 
-  resort = computed(() => this.resortState()?.value);
-
   filteredLifts = computed(() => {
-    const r = this.resort();
+    const r = this.resortResource.value();
     if (!r) return [];
     const type = this.selectedLiftType();
     if (!type) return r.lifts;
@@ -360,7 +334,7 @@ export class ResortDetailComponent {
   });
 
   selectedLift = computed(() => {
-    const r = this.resort();
+    const r = this.resortResource.value();
     const liftId = this.expandedLiftId();
     if (!r || !liftId) return null;
     return r.lifts.find((l: Lift) => l.id === liftId) ?? null;
@@ -379,7 +353,7 @@ export class ResortDetailComponent {
   }
 
   getSlopePercentage(count: number): number {
-    const r = this.resort();
+    const r = this.resortResource.value();
     if (!r) return 0;
     const total = r.blueSlopes + r.redSlopes + r.blackSlopes;
     return total > 0 ? (count / total) * 100 : 0;
