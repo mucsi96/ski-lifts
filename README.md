@@ -45,7 +45,7 @@ A full-stack application for exploring Swiss ski resorts, their lifts, and eleva
   - **Open Elevation API** for elevation profiles
 
 ### Frontend
-- **Angular 18** with standalone components
+- **Angular 19** with standalone components
 - **Angular Signals** and **rxResource** for reactive state management
 - **SCSS** for styling
 - **SVG** for elevation profile visualization
