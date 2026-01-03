@@ -14,7 +14,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/import")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class DataImportController {
 
     private final DataImportService dataImportService;
