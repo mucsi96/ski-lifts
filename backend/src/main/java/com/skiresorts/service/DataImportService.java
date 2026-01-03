@@ -25,28 +25,29 @@ public class DataImportService {
     private final SkiResortRepository skiResortRepository;
     private final LiftRepository liftRepository;
 
-    // Well-known Swiss ski resorts with their approximate coordinates
+    // Well-known Swiss ski resorts with coordinates centered on ski areas (not villages)
+    // Using larger search radii to capture all lifts in spread-out ski domains
     private static final List<ResortInfo> KNOWN_RESORTS = List.of(
-            new ResortInfo("Zermatt", "Valais", "VS", 46.0207, 7.7491, 5000),
-            new ResortInfo("Arosa Lenzerheide", "Graubünden", "GR", 46.7833, 9.6833, 8000),
-            new ResortInfo("St. Moritz", "Engadin", "GR", 46.4908, 9.8355, 6000),
-            new ResortInfo("Verbier", "Valais", "VS", 46.0964, 7.2286, 5000),
-            new ResortInfo("Davos Klosters", "Graubünden", "GR", 46.8027, 9.8360, 6000),
-            new ResortInfo("Laax", "Graubünden", "GR", 46.8079, 9.2593, 5000),
-            new ResortInfo("Engelberg-Titlis", "Central Switzerland", "OW", 46.8210, 8.4054, 4000),
-            new ResortInfo("Grindelwald", "Bernese Oberland", "BE", 46.6244, 8.0413, 5000),
-            new ResortInfo("Wengen", "Bernese Oberland", "BE", 46.6079, 7.9222, 4000),
-            new ResortInfo("Saas-Fee", "Valais", "VS", 46.1088, 7.9278, 4000),
-            new ResortInfo("Crans-Montana", "Valais", "VS", 46.3113, 7.4797, 5000),
-            new ResortInfo("Adelboden", "Bernese Oberland", "BE", 46.4920, 7.5610, 4000),
-            new ResortInfo("Lenk", "Bernese Oberland", "BE", 46.4575, 7.4417, 4000),
-            new ResortInfo("Gstaad", "Bernese Oberland", "BE", 46.4747, 7.2869, 5000),
-            new ResortInfo("Flims", "Graubünden", "GR", 46.8360, 9.2870, 4000),
-            new ResortInfo("Andermatt", "Central Switzerland", "UR", 46.6333, 8.5936, 4000),
-            new ResortInfo("Villars", "Vaud", "VD", 46.2989, 7.0550, 4000),
-            new ResortInfo("Champéry", "Valais", "VS", 46.1750, 6.8694, 4000),
-            new ResortInfo("Nendaz", "Valais", "VS", 46.1867, 7.3031, 4000),
-            new ResortInfo("Leukerbad", "Valais", "VS", 46.3794, 7.6269, 3000)
+            new ResortInfo("Zermatt", "Valais", "VS", 46.0107, 7.7700, 10000),  // Centered between village and Klein Matterhorn
+            new ResortInfo("Arosa Lenzerheide", "Graubünden", "GR", 46.7900, 9.6700, 12000),  // Large connected area
+            new ResortInfo("St. Moritz", "Engadin", "GR", 46.5000, 9.8500, 10000),
+            new ResortInfo("Verbier", "Valais", "VS", 46.1000, 7.2300, 10000),  // 4 Vallées area
+            new ResortInfo("Davos Klosters", "Graubünden", "GR", 46.8100, 9.8500, 12000),  // Multiple ski areas
+            new ResortInfo("Laax", "Graubünden", "GR", 46.8400, 9.2300, 10000),  // Flims-Laax-Falera
+            new ResortInfo("Engelberg-Titlis", "Central Switzerland", "OW", 46.8000, 8.4100, 8000),
+            new ResortInfo("Grindelwald", "Bernese Oberland", "BE", 46.6300, 8.0200, 10000),  // Jungfrau region
+            new ResortInfo("Wengen", "Bernese Oberland", "BE", 46.6100, 7.9300, 8000),
+            new ResortInfo("Saas-Fee", "Valais", "VS", 46.1100, 7.9300, 6000),
+            new ResortInfo("Crans-Montana", "Valais", "VS", 46.3200, 7.5000, 8000),
+            new ResortInfo("Adelboden", "Bernese Oberland", "BE", 46.5000, 7.5600, 8000),  // Adelboden-Lenk area
+            new ResortInfo("Lenk", "Bernese Oberland", "BE", 46.4600, 7.4400, 6000),
+            new ResortInfo("Gstaad", "Bernese Oberland", "BE", 46.4800, 7.2900, 10000),  // Large ski area
+            new ResortInfo("Flims", "Graubünden", "GR", 46.8400, 9.2800, 8000),
+            new ResortInfo("Andermatt", "Central Switzerland", "UR", 46.6400, 8.6000, 8000),  // SkiArena Andermatt-Sedrun
+            new ResortInfo("Villars", "Vaud", "VD", 46.3000, 7.0600, 6000),
+            new ResortInfo("Champéry", "Valais", "VS", 46.1800, 6.8700, 6000),  // Portes du Soleil
+            new ResortInfo("Nendaz", "Valais", "VS", 46.1900, 7.3100, 8000),  // 4 Vallées
+            new ResortInfo("Leukerbad", "Valais", "VS", 46.3800, 7.6300, 5000)
     );
 
     record ResortInfo(String name, String region, String canton, double lat, double lon, int searchRadius) {}
@@ -229,19 +230,31 @@ public class DataImportService {
         List<Lift> lifts = new ArrayList<>();
         Set<String> processedNames = new HashSet<>();
 
+        log.info("Parsing {} OSM elements for resort {}", osmLifts.size(), resort.getName());
+
         for (Map<String, Object> osmLift : osmLifts) {
             try {
                 Map<String, Object> tags = (Map<String, Object>) osmLift.get("tags");
-                if (tags == null) continue;
+                if (tags == null) {
+                    log.debug("Skipping element without tags: {}", osmLift.get("id"));
+                    continue;
+                }
 
-                String name = (String) tags.getOrDefault("name", "Unnamed Lift");
+                String rawAerialway = tags.get("aerialway") != null ? tags.get("aerialway").toString() : "null";
+                String name = (String) tags.getOrDefault("name", "Unnamed Lift #" + osmLift.get("id"));
 
                 // Skip duplicates
-                if (processedNames.contains(name)) continue;
+                if (processedNames.contains(name)) {
+                    log.debug("Skipping duplicate lift: {}", name);
+                    continue;
+                }
                 processedNames.add(name);
 
                 String aerialwayType = overpassApiService.parseAerialwayType(tags);
-                if (aerialwayType == null) continue;
+                if (aerialwayType == null) {
+                    log.debug("Skipping non-transport aerialway: {} (type: {})", name, rawAerialway);
+                    continue;
+                }
 
                 Lift lift = Lift.builder()
                         .name(name)

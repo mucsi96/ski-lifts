@@ -141,6 +141,8 @@ public class OverpassApiService {
 
     private List<Map<String, Object>> executeQuery(String query) {
         try {
+            log.debug("Executing Overpass query: {}", query.replaceAll("\\s+", " ").trim());
+
             WebClient webClient = webClientBuilder
                     .baseUrl(OVERPASS_API_URL)
                     .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
@@ -152,19 +154,28 @@ public class OverpassApiService {
                     .retrieve()
                     .bodyToMono(String.class)
                     .onErrorResume(e -> {
-                        log.error("Error executing Overpass query: {}", e.getMessage());
-                        return Mono.just("{}");
+                        log.error("Error executing Overpass query: {} - {}", e.getClass().getSimpleName(), e.getMessage());
+                        return Mono.empty();
                     })
                     .block();
 
             if (response == null || response.isEmpty()) {
+                log.warn("Overpass API returned empty response");
                 return List.of();
             }
 
             JsonNode root = objectMapper.readTree(response);
+
+            // Check for API errors
+            if (root.has("remark")) {
+                log.warn("Overpass API remark: {}", root.get("remark").asText());
+            }
+
             JsonNode elements = root.get("elements");
 
             if (elements == null || !elements.isArray()) {
+                log.warn("Overpass response has no 'elements' array. Response keys: {}",
+                        root.fieldNames().hasNext() ? root.fieldNames().next() : "none");
                 return List.of();
             }
 
@@ -177,7 +188,7 @@ public class OverpassApiService {
             return results;
 
         } catch (Exception e) {
-            log.error("Failed to execute Overpass query", e);
+            log.error("Failed to execute Overpass query: {} - {}", e.getClass().getSimpleName(), e.getMessage());
             return List.of();
         }
     }
@@ -190,15 +201,28 @@ public class OverpassApiService {
         Object type = tags.get("aerialway");
         if (type == null) return null;
 
-        return switch (type.toString()) {
+        String typeStr = type.toString().toLowerCase();
+
+        // Exclude non-transport types (stations, pylons, etc.)
+        if (typeStr.equals("station") || typeStr.equals("pylon") ||
+            typeStr.equals("goods") || typeStr.equals("construction")) {
+            return null;
+        }
+
+        return switch (typeStr) {
             case "cable_car" -> "CABLE_CAR";
             case "gondola" -> "GONDOLA";
             case "chair_lift" -> "CHAIRLIFT";
-            case "drag_lift", "platter", "j-bar" -> "DRAG_LIFT";
+            case "drag_lift", "platter", "j-bar", "rope_tow" -> "DRAG_LIFT";
             case "t-bar" -> "T_BAR";
             case "magic_carpet" -> "MAGIC_CARPET";
             case "funicular" -> "FUNICULAR";
-            default -> "CHAIRLIFT";
+            case "mixed_lift" -> "GONDOLA"; // Mixed lifts typically include gondola cabins
+            case "zip_line", "canopy" -> null; // Not ski lifts
+            default -> {
+                log.debug("Unknown aerialway type: {}", typeStr);
+                yield "CHAIRLIFT";
+            }
         };
     }
 
