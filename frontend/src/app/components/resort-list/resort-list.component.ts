@@ -1,10 +1,17 @@
-import { Component, computed, signal, inject } from '@angular/core';
+import { Component, computed, signal, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { rxResource } from '@angular/core/rxjs-interop';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { SkiResortService } from '../../services/ski-resort.service';
 import { SkiResort } from '../../models/ski-resort.model';
+import { catchError, of, startWith, map } from 'rxjs';
+
+interface ResourceState<T> {
+  value: T | null;
+  isLoading: boolean;
+  error: Error | null;
+}
 
 @Component({
   selector: 'app-resort-list',
@@ -51,9 +58,9 @@ import { SkiResort } from '../../models/ski-resort.model';
         </div>
       </div>
 
-      @if (resortsResource.isLoading()) {
+      @if (resortsState().isLoading) {
         <div class="loading-spinner"></div>
-      } @else if (resortsResource.error()) {
+      } @else if (resortsState().error) {
         <div class="error-message">
           Failed to load resorts. Please try again later.
         </div>
@@ -252,17 +259,36 @@ export class ResortListComponent {
   maxDriveTime = signal<number | null>(null);
   sortBy = signal<'name' | 'driveTime' | 'slopes' | 'elevation'>('name');
 
-  resortsResource = rxResource({
-    loader: () => this.skiResortService.getAllResorts()
+  private resortsResource$ = this.skiResortService.getAllResorts().pipe(
+    map((resorts): ResourceState<SkiResort[]> => ({
+      value: resorts,
+      isLoading: false,
+      error: null
+    })),
+    startWith<ResourceState<SkiResort[]>>({
+      value: null,
+      isLoading: true,
+      error: null
+    }),
+    catchError((err: Error) => of<ResourceState<SkiResort[]>>({
+      value: null,
+      isLoading: false,
+      error: err
+    }))
+  );
+
+  resortsState = toSignal(this.resortsResource$, {
+    initialValue: { value: null, isLoading: true, error: null } as ResourceState<SkiResort[]>
   });
 
   filteredResorts = computed(() => {
-    const resorts = this.resortsResource.value() ?? [];
+    const state = this.resortsState();
+    const resorts = state?.value ?? [];
     const query = this.searchQuery().toLowerCase();
     const maxTime = this.maxDriveTime();
     const sort = this.sortBy();
 
-    let filtered = resorts.filter((resort) => {
+    const filtered = resorts.filter((resort: SkiResort) => {
       const matchesSearch =
         !query ||
         resort.name.toLowerCase().includes(query) ||
@@ -272,7 +298,7 @@ export class ResortListComponent {
       return matchesSearch && matchesDriveTime;
     });
 
-    return filtered.sort((a, b) => {
+    return filtered.sort((a: SkiResort, b: SkiResort) => {
       switch (sort) {
         case 'name':
           return a.name.localeCompare(b.name);

@@ -1,12 +1,19 @@
 import { Component, computed, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { rxResource } from '@angular/core/rxjs-interop';
-import { map } from 'rxjs/operators';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { map, switchMap, startWith, catchError } from 'rxjs/operators';
+import { of } from 'rxjs';
 import { SkiResortService } from '../../services/ski-resort.service';
-import { Lift, LIFT_TYPE_ICONS, LiftType } from '../../models/ski-resort.model';
+import { Lift, SkiResortDetail, LIFT_TYPE_ICONS, LiftType } from '../../models/ski-resort.model';
 import { LiftCardComponent } from '../lift-card/lift-card.component';
 import { ElevationChartComponent } from '../elevation-chart/elevation-chart.component';
+
+interface ResourceState<T> {
+  value: T | null;
+  isLoading: boolean;
+  error: Error | null;
+}
 
 @Component({
   selector: 'app-resort-detail',
@@ -18,99 +25,101 @@ import { ElevationChartComponent } from '../elevation-chart/elevation-chart.comp
         <span class="arrow">←</span> Back to all resorts
       </a>
 
-      @if (resortResource.isLoading()) {
+      @if (resortState().isLoading) {
         <div class="loading-spinner"></div>
-      } @else if (resortResource.error()) {
+      } @else if (resortState().error) {
         <div class="error-message">
           Failed to load resort details. Please try again later.
         </div>
-      } @else if (resort(); as r) {
-        <div class="resort-header-card card">
-          <div class="header-content">
-            <div class="header-main">
-              <h1>{{ r.name }}</h1>
-              <p class="region">{{ r.region }}, {{ r.canton }}</p>
-            </div>
-            <div class="header-stats">
-              <div class="stat">
-                <span class="stat-value">{{ formatDriveTime(r.driveTimeFromZurichMinutes) }}</span>
-                <span class="stat-label">from Zurich</span>
+      } @else {
+        @if (resort(); as r) {
+          <div class="resort-header-card card">
+            <div class="header-content">
+              <div class="header-main">
+                <h1>{{ r.name }}</h1>
+                <p class="region">{{ r.region }}, {{ r.canton }}</p>
               </div>
-              <div class="stat">
-                <span class="stat-value">{{ r.maxElevation }}m</span>
-                <span class="stat-label">max elevation</span>
-              </div>
-              <div class="stat">
-                <span class="stat-value">{{ r.totalSlopeKm }}km</span>
-                <span class="stat-label">total slopes</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="slopes-detail">
-            <h3>Slope Distribution</h3>
-            <div class="slopes-bars">
-              <div class="slope-bar">
-                <div class="bar-fill blue" [style.width.%]="getSlopePercentage(r.blueSlopes)"></div>
-                <span class="bar-label">Blue: {{ r.blueSlopes }}</span>
-              </div>
-              <div class="slope-bar">
-                <div class="bar-fill red" [style.width.%]="getSlopePercentage(r.redSlopes)"></div>
-                <span class="bar-label">Red: {{ r.redSlopes }}</span>
-              </div>
-              <div class="slope-bar">
-                <div class="bar-fill black" [style.width.%]="getSlopePercentage(r.blackSlopes)"></div>
-                <span class="bar-label">Black: {{ r.blackSlopes }}</span>
+              <div class="header-stats">
+                <div class="stat">
+                  <span class="stat-value">{{ formatDriveTime(r.driveTimeFromZurichMinutes) }}</span>
+                  <span class="stat-label">from Zurich</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-value">{{ r.maxElevation }}m</span>
+                  <span class="stat-label">max elevation</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-value">{{ r.totalSlopeKm }}km</span>
+                  <span class="stat-label">total slopes</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          @if (r.websiteUrl) {
-            <a [href]="r.websiteUrl" target="_blank" class="btn btn-primary website-link">
-              Visit Website
-            </a>
-          }
-        </div>
-
-        <section class="lifts-section">
-          <div class="section-header">
-            <h2>Lifts ({{ r.lifts.length }})</h2>
-            <div class="lift-type-filter">
-              <button
-                class="filter-btn"
-                [class.active]="selectedLiftType() === null"
-                (click)="selectedLiftType.set(null)"
-              >
-                All
-              </button>
-              @for (type of liftTypes; track type) {
-                <button
-                  class="filter-btn"
-                  [class.active]="selectedLiftType() === type"
-                  (click)="selectedLiftType.set(type)"
-                >
-                  {{ getLiftIcon(type) }} {{ type.replace('_', ' ') }}
-                </button>
-              }
+            <div class="slopes-detail">
+              <h3>Slope Distribution</h3>
+              <div class="slopes-bars">
+                <div class="slope-bar">
+                  <div class="bar-fill blue" [style.width.%]="getSlopePercentage(r.blueSlopes)"></div>
+                  <span class="bar-label">Blue: {{ r.blueSlopes }}</span>
+                </div>
+                <div class="slope-bar">
+                  <div class="bar-fill red" [style.width.%]="getSlopePercentage(r.redSlopes)"></div>
+                  <span class="bar-label">Red: {{ r.redSlopes }}</span>
+                </div>
+                <div class="slope-bar">
+                  <div class="bar-fill black" [style.width.%]="getSlopePercentage(r.blackSlopes)"></div>
+                  <span class="bar-label">Black: {{ r.blackSlopes }}</span>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div class="lifts-grid">
-            @for (lift of filteredLifts(); track lift.id) {
-              <app-lift-card
-                [lift]="lift"
-                [isExpanded]="expandedLiftId() === lift.id"
-                (toggle)="toggleLift(lift.id)"
-              />
+            @if (r.websiteUrl) {
+              <a [href]="r.websiteUrl" target="_blank" class="btn btn-primary website-link">
+                Visit Website
+              </a>
             }
           </div>
-        </section>
 
-        @if (selectedLift(); as lift) {
-          <section class="elevation-section">
-            <h2>Elevation Profile: {{ lift.name }}</h2>
-            <app-elevation-chart [lift]="lift" />
+          <section class="lifts-section">
+            <div class="section-header">
+              <h2>Lifts ({{ r.lifts.length }})</h2>
+              <div class="lift-type-filter">
+                <button
+                  class="filter-btn"
+                  [class.active]="selectedLiftType() === null"
+                  (click)="selectedLiftType.set(null)"
+                >
+                  All
+                </button>
+                @for (type of liftTypes; track type) {
+                  <button
+                    class="filter-btn"
+                    [class.active]="selectedLiftType() === type"
+                    (click)="selectedLiftType.set(type)"
+                  >
+                    {{ getLiftIcon(type) }} {{ type.replace('_', ' ') }}
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div class="lifts-grid">
+              @for (lift of filteredLifts(); track lift.id) {
+                <app-lift-card
+                  [lift]="lift"
+                  [isExpanded]="expandedLiftId() === lift.id"
+                  (toggle)="toggleLift(lift.id)"
+                />
+              }
+            </div>
           </section>
+
+          @if (selectedLift(); as lift) {
+            <section class="elevation-section">
+              <h2>Elevation Profile: {{ lift.name }}</h2>
+              <app-elevation-chart [lift]="lift" />
+            </section>
+          }
         }
       }
     </div>
@@ -313,30 +322,48 @@ export class ResortDetailComponent {
 
   liftTypes: LiftType[] = ['GONDOLA', 'CABLE_CAR', 'CHAIRLIFT', 'DRAG_LIFT', 'FUNICULAR'];
 
-  private resortId = this.route.paramMap.pipe(
-    map((params) => Number(params.get('id')))
+  private resortResource$ = this.route.paramMap.pipe(
+    map((params) => Number(params.get('id'))),
+    switchMap((id: number) =>
+      this.skiResortService.getResortById(id).pipe(
+        map((resort): ResourceState<SkiResortDetail> => ({
+          value: resort,
+          isLoading: false,
+          error: null
+        })),
+        startWith<ResourceState<SkiResortDetail>>({
+          value: null,
+          isLoading: true,
+          error: null
+        }),
+        catchError((err: Error) => of<ResourceState<SkiResortDetail>>({
+          value: null,
+          isLoading: false,
+          error: err
+        }))
+      )
+    )
   );
 
-  resortResource = rxResource({
-    request: () => this.resortId,
-    loader: ({ request: id }) => this.skiResortService.getResortById(id as unknown as number)
+  resortState = toSignal(this.resortResource$, {
+    initialValue: { value: null, isLoading: true, error: null } as ResourceState<SkiResortDetail>
   });
 
-  resort = computed(() => this.resortResource.value());
+  resort = computed(() => this.resortState()?.value);
 
   filteredLifts = computed(() => {
     const r = this.resort();
     if (!r) return [];
     const type = this.selectedLiftType();
     if (!type) return r.lifts;
-    return r.lifts.filter((lift) => lift.liftType === type);
+    return r.lifts.filter((lift: Lift) => lift.liftType === type);
   });
 
   selectedLift = computed(() => {
     const r = this.resort();
     const liftId = this.expandedLiftId();
     if (!r || !liftId) return null;
-    return r.lifts.find((l) => l.id === liftId) ?? null;
+    return r.lifts.find((l: Lift) => l.id === liftId) ?? null;
   });
 
   toggleLift(liftId: number): void {
